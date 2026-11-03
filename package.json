@@ -2,7 +2,7 @@
   "name": "@tree-sitter-grammars/tree-sitter-hcl",
   "version": "1.2.0",
   "description": "HCL and terraform grammar for tree-sitter",
-  "repository": "https://github.com/tree-sitter-grammars/tree-sitter-hcl",
+  "repository": "https://github.com/githits-com/tree-sitter-hcl",
   "license": "Apache-2.0",
   "main": "bindings/node",
   "types": "bindings/node",

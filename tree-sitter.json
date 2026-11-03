@@ -26,7 +26,7 @@
     "license": "Apache-2.0",
     "description": "HCL and terraform grammar for tree-sitter",
     "links": {
-      "repository": "https://github.com/tree-sitter-grammars/tree-sitter-hcl"
+      "repository": "https://github.com/githits-com/tree-sitter-hcl"
     }
   }
 }
