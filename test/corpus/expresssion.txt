@@ -1,5 +1,7 @@
 ======
 Unary operation on variable with splat expression
+:language(hcl)
+:language(terraform)
 =====
 
 foo = !var.bar
@@ -20,6 +22,8 @@ foo = !var.bar
 
 =====
 Attribute as conditional expression
+:language(hcl)
+:language(terraform)
 =====
 
 foo = local.bar == local.baz

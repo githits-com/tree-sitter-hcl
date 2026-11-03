@@ -1,5 +1,7 @@
 ================================================================================
 example 1
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 provider "kubernetes" {
@@ -65,6 +67,8 @@ provider "kubernetes" {
 
 ================================================================================
 example 2
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 locals {
@@ -461,6 +465,8 @@ resource "azurerm_storage_blob" "proxy_cert" {
 
 ================================================================================
 example 3
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 private_key_pem = element(tls_private_key.server.*.private_key_pem, count.index)
@@ -492,6 +498,8 @@ private_key_pem = element(tls_private_key.server.*.private_key_pem, count.index)
 
 ================================================================================
 example 4
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 locals {

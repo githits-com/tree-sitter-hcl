@@ -6,7 +6,7 @@ license = "Apache-2.0"
 readme = "README.md"
 keywords = ["incremental", "parsing", "tree-sitter", "hcl"]
 categories = ["parser-implementations", "parsing", "text-editors"]
-repository = "https://github.com/tree-sitter-grammars/tree-sitter-hcl"
+repository = "https://github.com/githits-com/tree-sitter-hcl"
 edition = "2021"
 autoexamples = false
 

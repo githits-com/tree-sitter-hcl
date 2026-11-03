@@ -18,7 +18,7 @@ license.text = "Apache-2.0"
 readme = "README.md"
 
 [project.urls]
-Homepage = "https://github.com/tree-sitter-grammars/tree-sitter-hcl"
+Homepage = "https://github.com/githits-com/tree-sitter-hcl"
 
 [project.optional-dependencies]
 core = ["tree-sitter~=0.24"]

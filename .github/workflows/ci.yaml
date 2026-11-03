@@ -11,6 +11,11 @@ on:
       - example/**
       - bindings/**
       - binding.gyp
+      - dialects/**
+      - .github/workflows/ci.yaml
+      - package*.json
+      - Cargo.*
+      - tree-sitter.json
   pull_request:
     paths:
       - grammar.js
@@ -20,6 +25,11 @@ on:
       - example/**
       - bindings/**
       - binding.gyp
+      - dialects/**
+      - .github/workflows/ci.yaml
+      - package*.json
+      - Cargo.*
+      - tree-sitter.json
 
 concurrency:
   group: ${{github.workflow}}-${{github.ref}}
@@ -38,6 +48,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up tree-sitter
         uses: tree-sitter/setup-action/cli@v1
+        with:
+          tree-sitter-ref: v0.25.6
       - name: Run parser and binding tests
         uses: tree-sitter/parser-test-action@v2
         with:
