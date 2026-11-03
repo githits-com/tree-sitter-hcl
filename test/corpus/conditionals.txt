@@ -1,5 +1,7 @@
 ================================================================================
 simple conditional expression
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 foo = predicate() ? 1 : 2
@@ -24,6 +26,8 @@ foo = predicate() ? 1 : 2
 
 ================================================================================
 nested conditional expression expression
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 foo = ( true ? false : true ) ? "yes" : "no"
@@ -63,6 +67,8 @@ foo = ( true ? false : true ) ? "yes" : "no"
 
 ================================================================================
 nested conditional expression expression without parentheses
+:language(hcl)
+:language(terraform)
 ================================================================================
 
 foo =  true ? false : true  ? "yes" : "no"
