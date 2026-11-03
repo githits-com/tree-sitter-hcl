@@ -16,9 +16,10 @@ every corpus case selects both languages. Parsing does not validate Terraform
 provider schemas or evaluate configuration.
 
 Heredoc identifiers use the generated grammar's Unicode identifier ranges and
-UTF-8 bytes rather than locale-dependent character classification. Empty or
-digit-first delimiters are rejected. The old `CHAR_MAX` bound was unrelated to
-the C scanner's `uint32_t` serialized lengths; removing it makes supported long
+UTF-8 bytes rather than locale-dependent character classification. Digit-first
+and other non-identifier starts are rejected. The scanner still skips whitespace
+before an opener, including newlines; it does not validate opener line shape.
+The old `CHAR_MAX` bound was unrelated to the C scanner's `uint32_t` serialized lengths; removing it makes supported long
 delimiters independent of the platform's plain-char signedness. See upstream
 [issue #78](https://github.com/tree-sitter-grammars/tree-sitter-hcl/issues/78).
 

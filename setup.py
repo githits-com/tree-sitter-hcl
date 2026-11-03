@@ -62,6 +62,7 @@ setup(
         Extension(
             name="_binding",
             sources=sources,
+            depends=["src/identifier_ranges.h"],
             extra_compile_args=cflags,
             define_macros=macros,
             include_dirs=["src"],

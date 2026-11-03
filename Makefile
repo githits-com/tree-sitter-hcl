@@ -3,7 +3,7 @@ $(error Windows is not supported)
 endif
 
 LANGUAGE_NAME := tree-sitter-hcl
-HOMEPAGE_URL := https://github.com/tree-sitter-grammars/tree-sitter-hcl
+HOMEPAGE_URL := https://github.com/githits-com/tree-sitter-hcl
 VERSION := 1.2.0
 
 # repository
@@ -48,6 +48,8 @@ ifneq ($(filter $(shell uname),FreeBSD NetBSD DragonFly),)
 endif
 
 all: lib$(LANGUAGE_NAME).a lib$(LANGUAGE_NAME).$(SOEXT) $(LANGUAGE_NAME).pc
+
+$(SRC_DIR)/scanner.o: $(SRC_DIR)/identifier_ranges.h
 
 lib$(LANGUAGE_NAME).a: $(OBJS)
 	$(AR) $(ARFLAGS) $@ $^
