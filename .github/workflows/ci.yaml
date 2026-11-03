@@ -13,6 +13,9 @@ on:
       - binding.gyp
       - dialects/**
       - .github/workflows/ci.yaml
+      - package*.json
+      - Cargo.*
+      - tree-sitter.json
   pull_request:
     paths:
       - grammar.js
@@ -24,6 +27,9 @@ on:
       - binding.gyp
       - dialects/**
       - .github/workflows/ci.yaml
+      - package*.json
+      - Cargo.*
+      - tree-sitter.json
 
 concurrency:
   group: ${{github.workflow}}-${{github.ref}}
