@@ -18,6 +18,7 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=src/identifier_ranges.h");
+    println!("cargo:rerun-if-changed=src/heredoc_hash.h");
 
     c_config.compile("tree-sitter-hcl");
 }

@@ -3,6 +3,7 @@
 #include <string.h>
 #include "tree_sitter/parser.h"
 #include "identifier_ranges.h"
+#include "heredoc_hash.h"
 #include <wctype.h>
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -104,6 +105,8 @@ typedef struct {
 
     // valid if type == HEREDOC_TEMPLATE
     String heredoc_identifier;
+    // Original UTF-8 byte length; payloads over 32 bytes store only a digest.
+    uint32_t heredoc_identifier_length;
 } Context;
 
 typedef struct {
@@ -167,7 +170,7 @@ static unsigned serialize(Scanner *scanner, char *buf) {
         }
         memcpy(&buf[size], &(context->type), sizeof(ContextType));
         size += sizeof(ContextType);
-        memcpy(&buf[size], &(context->heredoc_identifier.len), sizeof(uint32_t));
+        memcpy(&buf[size], &(context->heredoc_identifier_length), sizeof(uint32_t));
         size += sizeof(uint32_t);
         memcpy(&buf[size], context->heredoc_identifier.data, context->heredoc_identifier.len);
         size += context->heredoc_identifier.len;
@@ -187,15 +190,16 @@ static void deserialize(Scanner *scanner, const char *buffer, unsigned length) {
     memcpy(&context_stack_size, &buffer[size], sizeof(uint32_t));
     size += sizeof(uint32_t);
     for (uint32_t j = 0; j < context_stack_size; j++) {
-        Context ctx;
+        Context ctx = {0};
         ctx.heredoc_identifier = string_new();
 
         memcpy(&(ctx.type), &buffer[size], sizeof(ContextType));
         size += sizeof(ContextType);
 
-        uint32_t heredoc_identifier_size;
-        memcpy(&heredoc_identifier_size, &buffer[size], sizeof(uint32_t));
+        memcpy(&ctx.heredoc_identifier_length, &buffer[size], sizeof(uint32_t));
         size += sizeof(uint32_t);
+        uint32_t heredoc_identifier_size = ctx.heredoc_identifier_length > HCL_HEREDOC_HASH_SIZE
+            ? HCL_HEREDOC_HASH_SIZE : ctx.heredoc_identifier_length;
         if (heredoc_identifier_size > 0) {
           STRING_GROW(ctx.heredoc_identifier, heredoc_identifier_size);
           memcpy(ctx.heredoc_identifier.data, buffer + size, heredoc_identifier_size);
@@ -272,6 +276,25 @@ static bool scan_quoted_escape(TSLexer *lexer) {
 static bool match_heredoc_prefix(const Context *context, TSLexer *lexer, bool *consumed) {
     const String *identifier = &context->heredoc_identifier;
     *consumed = false;
+    if (context->heredoc_identifier_length > HCL_HEREDOC_HASH_SIZE) {
+        // Openers keep the existing serialization-sized limit. A candidate can
+        // therefore be compared on the stack without allocation per body line.
+        char candidate[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+        uint32_t size = 0;
+        while (size < context->heredoc_identifier_length && identifier_continue(lexer->lookahead)) {
+            char bytes[4];
+            unsigned length = encode_codepoint(lexer->lookahead, bytes);
+            if (length > context->heredoc_identifier_length - size) return false;
+            memcpy(candidate + size, bytes, length);
+            advance(lexer);
+            *consumed = true;
+            size += length;
+        }
+        if (size != context->heredoc_identifier_length) return false;
+        uint8_t digest[HCL_HEREDOC_HASH_SIZE];
+        hcl_heredoc_hash(digest, candidate, size);
+        return memcmp(identifier->data, digest, HCL_HEREDOC_HASH_SIZE) == 0;
+    }
     for (size_t i = 0; i < identifier->len;) {
         char bytes[4];
         unsigned length = encode_codepoint(lexer->lookahead, bytes);
@@ -356,7 +379,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     }
     // manage quoted context
     if (valid_symbols[QUOTED_TEMPLATE_START] && !in_quoted_context(scanner) && lexer->lookahead == '"') {
-        Context ctx;
+        Context ctx = {0};
         ctx.type = QUOTED_TEMPLATE;
         ctx.heredoc_identifier = string_new();
         VEC_PUSH(scanner->context_stack, ctx);
@@ -372,7 +395,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         !in_interpolation_context(scanner) && lexer->lookahead == '$') {
         advance(lexer);
         if (lexer->lookahead == '{') {
-            Context ctx;
+            Context ctx = {0};
             ctx.type = TEMPLATE_INTERPOLATION;
             ctx.heredoc_identifier = string_new();
             VEC_PUSH(scanner->context_stack, ctx);
@@ -399,7 +422,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         !in_directive_context(scanner) && lexer->lookahead == '%') {
         advance(lexer);
         if (lexer->lookahead == '{') {
-            Context ctx;
+            Context ctx = {0};
             ctx.type = TEMPLATE_DIRECTIVE;
             ctx.heredoc_identifier = string_new();
             VEC_PUSH(scanner->context_stack, ctx);
@@ -431,7 +454,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         do {
             char bytes[4];
             unsigned length = encode_codepoint(lexer->lookahead, bytes);
-            // A delimiter must fit even with only its own context serialized.
+            // Preserve the existing opener bound independently of compact state.
             if (sizeof(uint32_t) * 2 + sizeof(ContextType) + identifier.len + length >= TREE_SITTER_SERIALIZATION_BUFFER_SIZE) {
                 STRING_FREE(identifier);
                 return false;
@@ -441,8 +464,15 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
             }
             advance(lexer);
         } while (identifier_continue(lexer->lookahead));
-        Context ctx;
+        Context ctx = {0};
         ctx.type = HEREDOC_TEMPLATE;
+        ctx.heredoc_identifier_length = identifier.len;
+        if (identifier.len > HCL_HEREDOC_HASH_SIZE) {
+            uint8_t digest[HCL_HEREDOC_HASH_SIZE];
+            hcl_heredoc_hash(digest, identifier.data, identifier.len);
+            memcpy(identifier.data, digest, sizeof(digest));
+            identifier.len = sizeof(digest);
+        }
         ctx.heredoc_identifier = identifier;
         VEC_PUSH(scanner->context_stack, ctx);
         return accept_inplace(lexer, HEREDOC_IDENTIFIER);

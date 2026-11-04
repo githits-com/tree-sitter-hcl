@@ -6,14 +6,18 @@ on:
     paths:
       - src/scanner.c
       - src/identifier_ranges.h
+      - src/heredoc_hash.h
       - dialects/*/src/scanner.c
       - dialects/*/src/identifier_ranges.h
+      - dialects/*/src/heredoc_hash.h
   pull_request:
     paths:
       - src/scanner.c
       - src/identifier_ranges.h
+      - src/heredoc_hash.h
       - dialects/*/src/scanner.c
       - dialects/*/src/identifier_ranges.h
+      - dialects/*/src/heredoc_hash.h
 
 jobs:
   fuzz:
