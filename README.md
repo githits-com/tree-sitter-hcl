@@ -6,7 +6,8 @@ tree-sitter grammar for the [HCL](https://github.com/hashicorp/hcl/blob/main/hcl
 
 This [fork](https://github.com/githits-com/tree-sitter-hcl) retains upstream's
 bindings and grammar structure, with narrow fixes for Unicode and long heredoc
-delimiters and integer-mantissa exponents such as `1e10`. It is consumed by a
+delimiters, template token boundaries, and integer-mantissa exponents such as
+`1e10`. It is consumed by a
 full Git revision; no separate registry release is required.
 
 The Rust `tree_sitter_hcl::LANGUAGE` binding parses HCL syntax, including native
@@ -25,16 +26,40 @@ lengths; removing it makes supported long delimiters independent of the platform
 plain-char signedness. See upstream
 [issue #78](https://github.com/tree-sitter-grammars/tree-sitter-hcl/issues/78).
 
-External scanner state must fit in Tree-sitter's 1,024-byte serialization buffer,
-including delimiter bytes and context metadata. An opener whose delimiter alone
-cannot fit is refused, yielding a parse error rather than a phantom declaration.
-Deeply nested templates can still exceed the combined state limit and produce
-error or mis-bounded trees. This fork does not claim arbitrary delimiter lengths
-or nesting depths. It preserves the state layout rather than adopting upstream
-[PR #79](https://github.com/tree-sitter-grammars/tree-sitter-hcl/pull/79), which also
-changes serialization density. The separate retained-memory report in
-[issue #77](https://github.com/tree-sitter-grammars/tree-sitter-hcl/issues/77) remains
-relevant for large or deeply nested templates; no memory improvement is claimed.
+The scanner batches ordinary literal text, including across heredoc lines.
+Active `${` and `%{` markers retain their own tokens; `$${` and `%%{` stay
+literal. Accepted ends preserve trailing-whitespace boundaries. Error recovery
+retains its previous token granularity. A delimiter-looking body prefix must
+leave a following interpolation or directive intact.
+
+External scanner state must fit in Tree-sitter's 1,024-byte serialization buffer.
+Delimiters through 32 UTF-8 bytes are stored and compared exactly. Longer ones
+store their original byte length and a SHA-256 digest, with no normalization.
+With four-byte C enums, a long-heredoc state is 44 bytes, 52 with interpolation,
+and 60 with a nested quote. This preserves context when a heredoc with a
+near-capacity delimiter contains interpolation. Quoted, interpolation and
+directive contexts keep empty delimiter payloads without allocation;
+deserialization allocates only actual delimiter data. The runtime stores the
+serialized bytes per external token. Resource qualification is recorded on the
+fork PR; process measurements do not establish whole-pipeline memory bounds.
+
+Long-delimiter matching assumes SHA-256 collision resistance. A different
+same-length identifier with the same digest would falsely close that file's
+heredoc; it is not mathematically byte-exact matching. The existing opener
+bound remains: at most 1,011 ASCII bytes under the normal four-byte-enum build,
+with excess refused as a parse error. Combined deep template stacks can still
+exceed the serialization limit and produce error or mis-bounded trees. This
+fork does not claim arbitrary delimiter lengths or nesting depths. These limits
+remain relevant to upstream's retained-memory
+[issue #77](https://github.com/tree-sitter-grammars/tree-sitter-hcl/issues/77).
+
+The private `heredoc_hash.h` copies use the portable C implementation from
+[amosnier/sha-2](https://github.com/amosnier/sha-2/tree/565f65009bdd98267361b17d50cddd7c9beb3e6c),
+under its offered **0BSD** license. The headers preserve the notice and source
+revision. Only symbol names, visibility, comments and header placement change;
+the algorithm is unchanged. Both grammar packages carry the same header so they
+can build independently. No public binding or generated-parser change is needed
+for this scanner-private representation.
 
 ## Regenerating the fork
 
@@ -57,9 +82,15 @@ for grammar in . dialects/terraform; do
     <(sed -n '/^static const TSCharacterRange hcl_identifier_.*\[\] = {/,/^};/p' "$grammar/src/identifier_ranges.h")
 done
 cmp src/identifier_ranges.h dialects/terraform/src/identifier_ranges.h
+cmp src/heredoc_hash.h dialects/terraform/src/heredoc_hash.h
+diff -u src/scanner.c \
+  <(sed 's/tree_sitter_terraform_external_scanner_/tree_sitter_hcl_external_scanner_/g' dialects/terraform/src/scanner.c)
 ```
 
-Run `tree-sitter test --debug-build` and `cargo test` for local correctness.
+Run `tree-sitter test --debug-build --rebuild` and `cargo test` for local correctness.
+The Rust units cover exact byte ranges, SHA-256 known vectors, compact state,
+Unicode/same-length mismatches and long-delimiter interpolation; the full corpus
+exercises both grammar entry points.
 The existing CI matrix verifies generated output, both grammar entry points,
 bindings and sample files; scanner changes also run the existing fuzz workflow.
 Node binding tests use the `tree-sitter` 0.25.1 dev dependency, whose C++20 build

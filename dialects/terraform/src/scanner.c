@@ -3,6 +3,7 @@
 #include <string.h>
 #include "tree_sitter/parser.h"
 #include "identifier_ranges.h"
+#include "heredoc_hash.h"
 #include <wctype.h>
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -102,7 +103,10 @@ static String string_new() { return (String){.cap = 16, .len = 0, .data = calloc
 typedef struct {
     ContextType type;
 
-    // valid if type == HEREDOC_TEMPLATE
+    // Original UTF-8 length; keep it before String to use existing 64-bit
+    // alignment padding. Contexts are copied on every external token.
+    uint32_t heredoc_identifier_length;
+    // Only heredoc contexts allocate this payload; long ones contain a digest.
     String heredoc_identifier;
 } Context;
 
@@ -167,9 +171,12 @@ static unsigned serialize(Scanner *scanner, char *buf) {
         }
         memcpy(&buf[size], &(context->type), sizeof(ContextType));
         size += sizeof(ContextType);
-        memcpy(&buf[size], &(context->heredoc_identifier.len), sizeof(uint32_t));
+        memcpy(&buf[size], &(context->heredoc_identifier_length), sizeof(uint32_t));
         size += sizeof(uint32_t);
-        memcpy(&buf[size], context->heredoc_identifier.data, context->heredoc_identifier.len);
+        // Empty contexts have NULL payloads; do not pass NULL to memcpy.
+        if (context->heredoc_identifier.len > 0) {
+            memcpy(&buf[size], context->heredoc_identifier.data, context->heredoc_identifier.len);
+        }
         size += context->heredoc_identifier.len;
     }
     return size;
@@ -187,15 +194,15 @@ static void deserialize(Scanner *scanner, const char *buffer, unsigned length) {
     memcpy(&context_stack_size, &buffer[size], sizeof(uint32_t));
     size += sizeof(uint32_t);
     for (uint32_t j = 0; j < context_stack_size; j++) {
-        Context ctx;
-        ctx.heredoc_identifier = string_new();
+        Context ctx = {0};
 
         memcpy(&(ctx.type), &buffer[size], sizeof(ContextType));
         size += sizeof(ContextType);
 
-        uint32_t heredoc_identifier_size;
-        memcpy(&heredoc_identifier_size, &buffer[size], sizeof(uint32_t));
+        memcpy(&ctx.heredoc_identifier_length, &buffer[size], sizeof(uint32_t));
         size += sizeof(uint32_t);
+        uint32_t heredoc_identifier_size = ctx.heredoc_identifier_length > HCL_HEREDOC_HASH_SIZE
+            ? HCL_HEREDOC_HASH_SIZE : ctx.heredoc_identifier_length;
         if (heredoc_identifier_size > 0) {
           STRING_GROW(ctx.heredoc_identifier, heredoc_identifier_size);
           memcpy(ctx.heredoc_identifier.data, buffer + size, heredoc_identifier_size);
@@ -243,6 +250,125 @@ static inline bool in_interpolation_context(Scanner *scanner) {
 
 static inline bool in_directive_context(Scanner *scanner) { return in_context_type(scanner, TEMPLATE_DIRECTIVE); }
 
+// Preserve the existing escape grammar while allowing a whole literal run.
+static bool scan_quoted_escape(TSLexer *lexer) {
+    advance(lexer);
+    switch (lexer->lookahead) {
+        case '"':
+        case 'n':
+        case 'r':
+        case 't':
+        case '\\':
+            advance(lexer);
+            return true;
+        case 'u':
+        case 'U': {
+            unsigned digits = lexer->lookahead == 'u' ? 4 : 8;
+            for (unsigned i = 0; i < digits; i++) {
+                if (!consume_wxdigit(lexer)) return false;
+            }
+            advance(lexer);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+// Leave the first mismatching codepoint available to literal/marker handling.
+static bool match_heredoc_prefix(const Context *context, TSLexer *lexer, bool *consumed) {
+    const String *identifier = &context->heredoc_identifier;
+    *consumed = false;
+    if (context->heredoc_identifier_length > HCL_HEREDOC_HASH_SIZE) {
+        // Openers keep the existing serialization-sized limit. A candidate can
+        // therefore be compared on the stack without allocation per body line.
+        char candidate[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+        uint32_t size = 0;
+        while (size < context->heredoc_identifier_length && identifier_continue(lexer->lookahead)) {
+            char bytes[4];
+            unsigned length = encode_codepoint(lexer->lookahead, bytes);
+            if (length > context->heredoc_identifier_length - size) return false;
+            memcpy(candidate + size, bytes, length);
+            advance(lexer);
+            *consumed = true;
+            size += length;
+        }
+        if (size != context->heredoc_identifier_length) return false;
+        uint8_t digest[HCL_HEREDOC_HASH_SIZE];
+        hcl_heredoc_hash(digest, candidate, size);
+        return memcmp(identifier->data, digest, HCL_HEREDOC_HASH_SIZE) == 0;
+    }
+    for (size_t i = 0; i < identifier->len;) {
+        char bytes[4];
+        unsigned length = encode_codepoint(lexer->lookahead, bytes);
+        if (length > identifier->len - i ||
+            memcmp(identifier->data + i, bytes, length) != 0) return false;
+        advance(lexer);
+        *consumed = true;
+        i += length;
+    }
+    return true;
+}
+
+// The caller has already marked a nonempty literal prefix. Lookahead may pass
+// its end, but only completed literal units extend the accepted token range.
+static bool scan_literal_tail(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
+    // Only the generated recovery set enables both quoted-end and heredoc-id.
+    // Preserve its token granularity instead of batching a speculative context.
+    if (valid_symbols[QUOTED_TEMPLATE_END] && valid_symbols[HEREDOC_IDENTIFIER]) {
+        return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+    }
+    bool line_start = false;
+    while (lexer->lookahead != 0) {
+        if (iswspace(lexer->lookahead)) {
+            if (lexer->lookahead == '\n') line_start = true;
+            advance(lexer);
+            continue;
+        }
+        if (line_start && in_heredoc_context(scanner) && valid_symbols[HEREDOC_IDENTIFIER]) {
+            bool consumed;
+            if (match_heredoc_prefix(&VEC_BACK(scanner->context_stack), lexer, &consumed)) {
+                // The next scan decides whether this is an own-line closer.
+                // Keep this token's old end and the heredoc context intact.
+                return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+            }
+            if (consumed) lexer->mark_end(lexer);
+            line_start = false;
+            continue;
+        }
+        line_start = false;
+        if (in_quoted_context(scanner)) {
+            if (valid_symbols[QUOTED_TEMPLATE_END] && lexer->lookahead == '"') break;
+            if (lexer->lookahead == '\\') {
+                if (!scan_quoted_escape(lexer)) break;
+                lexer->mark_end(lexer);
+                continue;
+            }
+        }
+        bool interpolation = lexer->lookahead == '$' && valid_symbols[TEMPLATE_INTERPOLATION_START];
+        bool directive = lexer->lookahead == '%' && valid_symbols[TEMPLATE_DIRECTIVE_START];
+        if (interpolation || directive) {
+            int32_t sigil = lexer->lookahead;
+            advance(lexer);
+            if (lexer->lookahead == '{') break;
+            if (lexer->lookahead == sigil) {
+                advance(lexer);
+                if (lexer->lookahead == '{') advance(lexer);
+            }
+        } else {
+            advance(lexer);
+        }
+        lexer->mark_end(lexer);
+    }
+    return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+}
+
+static bool finish_literal(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
+    lexer->mark_end(lexer);
+    if (in_template_context(scanner)) return scan_literal_tail(scanner, lexer, valid_symbols);
+    return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+}
+
 static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     bool has_leading_whitespace_with_newline = false;
     while (iswspace(lexer->lookahead)) {
@@ -256,9 +382,8 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     }
     // manage quoted context
     if (valid_symbols[QUOTED_TEMPLATE_START] && !in_quoted_context(scanner) && lexer->lookahead == '"') {
-        Context ctx;
+        Context ctx = {0};
         ctx.type = QUOTED_TEMPLATE;
-        ctx.heredoc_identifier = string_new();
         VEC_PUSH(scanner->context_stack, ctx);
         return accept_and_advance(lexer, QUOTED_TEMPLATE_START);
     }
@@ -272,9 +397,8 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         !in_interpolation_context(scanner) && lexer->lookahead == '$') {
         advance(lexer);
         if (lexer->lookahead == '{') {
-            Context ctx;
+            Context ctx = {0};
             ctx.type = TEMPLATE_INTERPOLATION;
-            ctx.heredoc_identifier = string_new();
             VEC_PUSH(scanner->context_stack, ctx);
             return accept_and_advance(lexer, TEMPLATE_INTERPOLATION_START);
         }
@@ -283,10 +407,11 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
             advance(lexer);
             if (lexer->lookahead == '{') {
                 // $${
-                return accept_and_advance(lexer, TEMPLATE_LITERAL_CHUNK);
+                advance(lexer);
+                return finish_literal(scanner, lexer, valid_symbols);
             }
         }
-        return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+        return finish_literal(scanner, lexer, valid_symbols);
     }
     if (valid_symbols[TEMPLATE_INTERPOLATION_END] && in_interpolation_context(scanner) && lexer->lookahead == '}') {
         VEC_POP(scanner->context_stack);
@@ -298,9 +423,8 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         !in_directive_context(scanner) && lexer->lookahead == '%') {
         advance(lexer);
         if (lexer->lookahead == '{') {
-            Context ctx;
+            Context ctx = {0};
             ctx.type = TEMPLATE_DIRECTIVE;
-            ctx.heredoc_identifier = string_new();
             VEC_PUSH(scanner->context_stack, ctx);
             return accept_and_advance(lexer, TEMPLATE_DIRECTIVE_START);
         }
@@ -308,11 +432,12 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         if (lexer->lookahead == '%') {
             advance(lexer);
             if (lexer->lookahead == '{') {
-                // $${
-                return accept_and_advance(lexer, TEMPLATE_LITERAL_CHUNK);
+                // %%{
+                advance(lexer);
+                return finish_literal(scanner, lexer, valid_symbols);
             }
         }
-        return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+        return finish_literal(scanner, lexer, valid_symbols);
     }
     if (valid_symbols[TEMPLATE_DIRECTIVE_END] && in_directive_context(scanner) && lexer->lookahead == '}') {
         VEC_POP(scanner->context_stack);
@@ -329,7 +454,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         do {
             char bytes[4];
             unsigned length = encode_codepoint(lexer->lookahead, bytes);
-            // A delimiter must fit even with only its own context serialized.
+            // Preserve the existing opener bound independently of compact state.
             if (sizeof(uint32_t) * 2 + sizeof(ContextType) + identifier.len + length >= TREE_SITTER_SERIALIZATION_BUFFER_SIZE) {
                 STRING_FREE(identifier);
                 return false;
@@ -339,77 +464,41 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
             }
             advance(lexer);
         } while (identifier_continue(lexer->lookahead));
-        Context ctx;
+        Context ctx = {0};
         ctx.type = HEREDOC_TEMPLATE;
+        ctx.heredoc_identifier_length = identifier.len;
+        if (identifier.len > HCL_HEREDOC_HASH_SIZE) {
+            uint8_t digest[HCL_HEREDOC_HASH_SIZE];
+            hcl_heredoc_hash(digest, identifier.data, identifier.len);
+            memcpy(identifier.data, digest, sizeof(digest));
+            identifier.len = sizeof(digest);
+        }
         ctx.heredoc_identifier = identifier;
         VEC_PUSH(scanner->context_stack, ctx);
         return accept_inplace(lexer, HEREDOC_IDENTIFIER);
     }
     if (valid_symbols[HEREDOC_IDENTIFIER] && in_heredoc_context(scanner) && has_leading_whitespace_with_newline) {
-        String expected_identifier = VEC_BACK(scanner->context_stack).heredoc_identifier;
-
-        for (size_t i = 0; i < expected_identifier.len;) {
-            char bytes[4];
-            unsigned length = encode_codepoint(lexer->lookahead, bytes);
-            if (length > expected_identifier.len - i ||
-                memcmp(expected_identifier.data + i, bytes, length) != 0) {
-                return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+        bool consumed;
+        if (match_heredoc_prefix(&VEC_BACK(scanner->context_stack), lexer, &consumed)) {
+            lexer->mark_end(lexer);
+            while (iswspace(lexer->lookahead) && lexer->lookahead != '\n') advance(lexer);
+            if (lexer->lookahead == '\n') {
+                VEC_POP(scanner->context_stack);
+                return accept_inplace(lexer, HEREDOC_IDENTIFIER);
             }
-            advance(lexer);
-            i += length;
+            // A failed own-line check must leave ${ and %{ intact. Keep the
+            // accepted end before any trailing whitespace already inspected.
+            return scan_literal_tail(scanner, lexer, valid_symbols);
         }
-        // check if the identifier is on a line of its own
-        lexer->mark_end(lexer);
-        while (iswspace(lexer->lookahead) && lexer->lookahead != '\n') {
-            advance(lexer);
-        }
-        if (lexer->lookahead == '\n') {
-            VEC_POP(scanner->context_stack);
-            return accept_inplace(lexer, HEREDOC_IDENTIFIER);
-        }
-        advance(lexer);
-        lexer->mark_end(lexer);
-        return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
+        if (consumed) return finish_literal(scanner, lexer, valid_symbols);
     }
-    // manage template literal chunks
-
-    // handle template literal chunks in quoted contexts
-    //
-    // they may not contain newlines and may contain escape sequences
-    if (valid_symbols[TEMPLATE_LITERAL_CHUNK] && in_quoted_context(scanner)) {
-        switch (lexer->lookahead) {
-            case '\\':
-                advance(lexer);
-                switch (lexer->lookahead) {
-                    case '"':
-                    case 'n':
-                    case 'r':
-                    case 't':
-                    case '\\':
-                        return accept_and_advance(lexer, TEMPLATE_LITERAL_CHUNK);
-                    case 'u':
-                        for (int i = 0; i < 4; i++) {
-                            if (!consume_wxdigit(lexer)) {
-                                return false;
-                            }
-                        }
-                        return accept_and_advance(lexer, TEMPLATE_LITERAL_CHUNK);
-                    case 'U':
-                        for (int i = 0; i < 8; i++) {
-                            if (!consume_wxdigit(lexer)) {
-                                return false;
-                            }
-                        }
-                        return accept_and_advance(lexer, TEMPLATE_LITERAL_CHUNK);
-                    default:
-                        return false;
-                }
-        }
-    }
-
-    // handle all other quoted template or string literal characters
     if (valid_symbols[TEMPLATE_LITERAL_CHUNK] && in_template_context(scanner)) {
-        return accept_and_advance(lexer, TEMPLATE_LITERAL_CHUNK);
+        if (in_quoted_context(scanner) && lexer->lookahead == '\\') {
+            if (!scan_quoted_escape(lexer)) return false;
+        } else {
+            advance(lexer);
+        }
+        return finish_literal(scanner, lexer, valid_symbols);
     }
 
     // probably not handled by the external scanner

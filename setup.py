@@ -62,7 +62,7 @@ setup(
         Extension(
             name="_binding",
             sources=sources,
-            depends=["src/identifier_ranges.h"],
+            depends=["src/identifier_ranges.h", "src/heredoc_hash.h"],
             extra_compile_args=cflags,
             define_macros=macros,
             include_dirs=["src"],
