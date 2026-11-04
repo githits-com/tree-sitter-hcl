@@ -103,10 +103,11 @@ static String string_new() { return (String){.cap = 16, .len = 0, .data = calloc
 typedef struct {
     ContextType type;
 
-    // valid if type == HEREDOC_TEMPLATE
-    String heredoc_identifier;
-    // Original UTF-8 byte length; payloads over 32 bytes store only a digest.
+    // Original UTF-8 length; keep it before String to use existing 64-bit
+    // alignment padding. Contexts are copied on every external token.
     uint32_t heredoc_identifier_length;
+    // Valid if type == HEREDOC_TEMPLATE; long payloads contain only a digest.
+    String heredoc_identifier;
 } Context;
 
 typedef struct {
