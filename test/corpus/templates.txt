@@ -1189,3 +1189,668 @@ LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
 resource "test" "after" {}
 
 --------------------------------------------------------------------------------
+
+================================================================================
+literal run quoted boundaries
+:language(hcl)
+:language(terraform)
+================================================================================
+
+plain = "alpha  beta  "
+value = "left \\ \" \n \r \t \u0041 \U0001F600 café $%$% $${escaped} %%{escaped} ${var.name} %{ if true }yes%{ else }no%{ endif } right  "
+resource "test" "quoted_after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (literal_value
+          (string_lit
+            (quoted_template_start)
+            (template_literal)
+            (quoted_template_end)))))
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (quoted_template
+            (quoted_template_start)
+            (template_literal)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (variable_expr
+                  (identifier))
+                (get_attr
+                  (identifier)))
+              (template_interpolation_end))
+            (template_directive
+              (template_if
+                (template_if_intro
+                  (template_directive_start)
+                  (expression
+                    (literal_value
+                      (bool_lit)))
+                  (template_directive_end))
+                (template_literal)
+                (template_else_intro
+                  (template_directive_start)
+                  (template_directive_end))
+                (template_literal)
+                (template_if_end
+                  (template_directive_start)
+                  (template_directive_end))))
+            (template_literal)
+            (quoted_template_end)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal run heredoc boundaries
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<-END
+  literal 本文 $%$% and $$$ %% $${escaped} %%{escaped}
+  ${var.name} then %{ if true }body%{ else }other%{ endif }
+  END-suffix
+  END
+resource "test" "heredoc_after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (variable_expr
+                  (identifier))
+                (get_attr
+                  (identifier)))
+              (template_interpolation_end))
+            (template_literal)
+            (template_directive
+              (template_if
+                (template_if_intro
+                  (template_directive_start)
+                  (expression
+                    (literal_value
+                      (bool_lit)))
+                  (template_directive_end))
+                (template_literal)
+                (template_else_intro
+                  (template_directive_start)
+                  (template_directive_end))
+                (template_literal)
+                (template_if_end
+                  (template_directive_start)
+                  (template_directive_end))))
+            (template_literal)
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal recovery invalid_escape_prefix
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = "abc\q"
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (ERROR
+        (quoted_template_start)
+        (UNEXPECTED '\')
+        (heredoc_identifier))
+      (expression
+        (literal_value
+          (string_lit
+            (quoted_template_start)
+            (template_literal)
+            (quoted_template_end))))))
+  (ERROR
+    (identifier)
+    (string_lit
+      (quoted_template_start)
+      (quoted_template_end))
+    (identifier)
+    (quoted_template_start)))
+
+================================================================================
+literal recovery truncated_escape_prefix
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = "abc\u12"
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (ERROR
+        (quoted_template_start)
+        (UNEXPECTED '\')
+        (heredoc_identifier))
+      (expression
+        (literal_value
+          (string_lit
+            (quoted_template_start)
+            (template_literal)
+            (quoted_template_end))))))
+  (ERROR
+    (identifier)
+    (string_lit
+      (quoted_template_start)
+      (quoted_template_end))
+    (identifier)
+    (quoted_template_start)))
+
+================================================================================
+literal recovery odd_mixed_markers
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = "$$${x} %%%{ if true }ok%{ endif } $%{ if true }yes%{ endif }"
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (quoted_template
+            (quoted_template_start)
+            (template_literal)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (variable_expr
+                  (identifier)))
+              (template_interpolation_end))
+            (template_literal)
+            (template_directive
+              (template_if
+                (template_if_intro
+                  (template_directive_start)
+                  (expression
+                    (literal_value
+                      (bool_lit)))
+                  (template_directive_end))
+                (template_literal)
+                (template_if_end
+                  (template_directive_start)
+                  (template_directive_end))))
+            (template_literal)
+            (template_directive
+              (template_if
+                (template_if_intro
+                  (template_directive_start)
+                  (expression
+                    (literal_value
+                      (bool_lit)))
+                  (template_directive_end))
+                (template_literal)
+                (template_if_end
+                  (template_directive_start)
+                  (template_directive_end))))
+            (quoted_template_end)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal recovery outside_template_markers
+:language(hcl)
+:language(terraform)
+================================================================================
+
+$% value = 1
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (ERROR
+    (heredoc_identifier)
+    (quoted_template_start)
+    (heredoc_identifier)
+    (quoted_template_start)
+    (quoted_template_end)
+    (quoted_template_start))
+  (object
+    (object_start)
+    (object_end)))
+
+================================================================================
+literal recovery inactive_label_interpolation
+:language(hcl)
+:language(terraform)
+================================================================================
+
+resource "a${b}" "c" {}
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal recovery delimiter_inside_directive
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<EOT
+%{ if true }
+EOT
+%{ endif }
+EOT
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_directive
+              (template_if
+                (template_if_intro
+                  (template_directive_start)
+                  (expression
+                    (literal_value
+                      (bool_lit)))
+                  (template_directive_end))
+                (template_literal)
+                (template_if_end
+                  (template_directive_start)
+                  (template_directive_end))))
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+heredoc closer prefix delimiter_prefix_interpolation
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<EOT
+EOT${x}
+EOT
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (variable_expr
+                  (identifier)))
+              (template_interpolation_end))
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal recovery quoted_newline
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = "one
+ two"
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (literal_value
+          (string_lit
+            (quoted_template_start)
+            (template_literal)
+            (quoted_template_end)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal recovery unterminated_quote
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = "abc
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (literal_value
+          (string_lit
+            (quoted_template_start)
+            (template_literal)
+            (quoted_template_end))))))
+  (ERROR
+    (identifier)
+    (string_lit
+      (quoted_template_start)
+      (quoted_template_end))
+    (identifier)
+    (quoted_template_start)))
+
+================================================================================
+literal recovery unterminated_heredoc
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<EOT
+literal
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (MISSING heredoc_identifier)))))))
+
+================================================================================
+heredoc closer prefix delimiter_gap_interpolation
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<EOT
+EOT ${x}
+EOT
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (variable_expr
+                  (identifier)))
+              (template_interpolation_end))
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+heredoc closer prefix delimiter_prefix_directive
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<EOT
+EOT%{ if true }body%{ endif }
+EOT
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (template_directive
+              (template_if
+                (template_if_intro
+                  (template_directive_start)
+                  (expression
+                    (literal_value
+                      (bool_lit)))
+                  (template_directive_end))
+                (template_literal)
+                (template_if_end
+                  (template_directive_start)
+                  (template_directive_end))))
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+literal recovery closer_at_eof
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<EOT
+body
+EOT
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (MISSING heredoc_identifier)))))))
+
+================================================================================
+heredoc closer prefix long_delimiter_prefix_interpolation
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<LONG_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+LONG_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA${x}
+LONG_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (variable_expr
+                  (identifier)))
+              (template_interpolation_end))
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
