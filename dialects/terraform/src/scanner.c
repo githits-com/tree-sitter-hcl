@@ -106,7 +106,7 @@ typedef struct {
     // Original UTF-8 length; keep it before String to use existing 64-bit
     // alignment padding. Contexts are copied on every external token.
     uint32_t heredoc_identifier_length;
-    // Valid if type == HEREDOC_TEMPLATE; long payloads contain only a digest.
+    // Only heredoc contexts allocate this payload; long ones contain a digest.
     String heredoc_identifier;
 } Context;
 
@@ -173,7 +173,10 @@ static unsigned serialize(Scanner *scanner, char *buf) {
         size += sizeof(ContextType);
         memcpy(&buf[size], &(context->heredoc_identifier_length), sizeof(uint32_t));
         size += sizeof(uint32_t);
-        memcpy(&buf[size], context->heredoc_identifier.data, context->heredoc_identifier.len);
+        // Empty contexts have NULL payloads; do not pass NULL to memcpy.
+        if (context->heredoc_identifier.len > 0) {
+            memcpy(&buf[size], context->heredoc_identifier.data, context->heredoc_identifier.len);
+        }
         size += context->heredoc_identifier.len;
     }
     return size;
@@ -192,7 +195,6 @@ static void deserialize(Scanner *scanner, const char *buffer, unsigned length) {
     size += sizeof(uint32_t);
     for (uint32_t j = 0; j < context_stack_size; j++) {
         Context ctx = {0};
-        ctx.heredoc_identifier = string_new();
 
         memcpy(&(ctx.type), &buffer[size], sizeof(ContextType));
         size += sizeof(ContextType);
@@ -382,7 +384,6 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     if (valid_symbols[QUOTED_TEMPLATE_START] && !in_quoted_context(scanner) && lexer->lookahead == '"') {
         Context ctx = {0};
         ctx.type = QUOTED_TEMPLATE;
-        ctx.heredoc_identifier = string_new();
         VEC_PUSH(scanner->context_stack, ctx);
         return accept_and_advance(lexer, QUOTED_TEMPLATE_START);
     }
@@ -398,7 +399,6 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         if (lexer->lookahead == '{') {
             Context ctx = {0};
             ctx.type = TEMPLATE_INTERPOLATION;
-            ctx.heredoc_identifier = string_new();
             VEC_PUSH(scanner->context_stack, ctx);
             return accept_and_advance(lexer, TEMPLATE_INTERPOLATION_START);
         }
@@ -425,7 +425,6 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
         if (lexer->lookahead == '{') {
             Context ctx = {0};
             ctx.type = TEMPLATE_DIRECTIVE;
-            ctx.heredoc_identifier = string_new();
             VEC_PUSH(scanner->context_stack, ctx);
             return accept_and_advance(lexer, TEMPLATE_DIRECTIVE_START);
         }

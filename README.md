@@ -36,10 +36,12 @@ External scanner state must fit in Tree-sitter's 1,024-byte serialization buffer
 Delimiters through 32 UTF-8 bytes are stored and compared exactly. Longer ones
 store their original byte length and a SHA-256 digest, with no normalization.
 With four-byte C enums, a long-heredoc state is 44 bytes, 52 with interpolation,
-and 60 with a nested quote. This also preserves context when a heredoc with a near-capacity
-delimiter contains interpolation. The runtime stores those bytes per external
-token; resource qualification belongs on the fork PR, not in correctness-test
-timing or a universal pipeline-memory claim.
+and 60 with a nested quote. This preserves context when a heredoc with a
+near-capacity delimiter contains interpolation. Quoted, interpolation and
+directive contexts keep empty delimiter payloads without allocation;
+deserialization allocates only actual delimiter data. The runtime stores the
+serialized bytes per external token. Resource qualification is recorded on the
+fork PR; process measurements do not establish whole-pipeline memory bounds.
 
 Long-delimiter matching assumes SHA-256 collision resistance. A different
 same-length identifier with the same digest would falsely close that file's
