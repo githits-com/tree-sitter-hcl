@@ -48,6 +48,7 @@ class EggInfo(egg_info):
         super().find_sources()
         self.filelist.recursive_include("queries", "*.scm")
         self.filelist.include("src/tree_sitter/*.h")
+        self.filelist.include("src/identifier_ranges.h")
 
 
 setup(
@@ -62,6 +63,7 @@ setup(
         Extension(
             name="_binding",
             sources=sources,
+            depends=["src/identifier_ranges.h"],
             extra_compile_args=cflags,
             define_macros=macros,
             include_dirs=["src"],

@@ -27,6 +27,8 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/src/parser.c"
 add_library(tree-sitter-hcl src/parser.c)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/scanner.c)
   target_sources(tree-sitter-hcl PRIVATE src/scanner.c)
+  set_property(SOURCE src/scanner.c APPEND PROPERTY
+               OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/identifier_ranges.h")
 endif()
 target_include_directories(tree-sitter-hcl
                            PRIVATE src

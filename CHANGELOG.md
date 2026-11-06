@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+fix:
+* scan heredoc identifiers with the grammar's Unicode ranges and persist them as UTF-8, so non-ASCII delimiters close instead of swallowing the rest of the file (#80)
+
 ## 1.2.0 - 2025-06-15
 
 feat:

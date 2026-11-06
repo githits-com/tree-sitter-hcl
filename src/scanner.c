@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "tree_sitter/parser.h"
+#include "identifier_ranges.h"
 #include <wctype.h>
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -119,6 +120,41 @@ typedef struct {
 static inline void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 
 static inline void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
+
+// Scanner lookahead is a Unicode codepoint; persisted identifiers are UTF-8.
+static unsigned encode_codepoint(int32_t codepoint, char bytes[4]) {
+    if (codepoint <= 0x7f) {
+        bytes[0] = (char)codepoint;
+        return 1;
+    }
+    if (codepoint <= 0x7ff) {
+        bytes[0] = (char)(0xc0 | (codepoint >> 6));
+        bytes[1] = (char)(0x80 | (codepoint & 0x3f));
+        return 2;
+    }
+    if (codepoint <= 0xffff) {
+        bytes[0] = (char)(0xe0 | (codepoint >> 12));
+        bytes[1] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+        bytes[2] = (char)(0x80 | (codepoint & 0x3f));
+        return 3;
+    }
+    bytes[0] = (char)(0xf0 | (codepoint >> 18));
+    bytes[1] = (char)(0x80 | ((codepoint >> 12) & 0x3f));
+    bytes[2] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+    bytes[3] = (char)(0x80 | (codepoint & 0x3f));
+    return 4;
+}
+
+static bool identifier_start(int32_t codepoint) {
+    return set_contains(hcl_identifier_start,
+        sizeof(hcl_identifier_start) / sizeof(hcl_identifier_start[0]), codepoint);
+}
+
+static bool identifier_continue(int32_t codepoint) {
+    // The grammar also permits :: in function names; heredoc identifiers do not.
+    return codepoint != ':' && set_contains(hcl_identifier_continue,
+        sizeof(hcl_identifier_continue) / sizeof(hcl_identifier_continue[0]), codepoint);
+}
 
 static unsigned serialize(Scanner *scanner, char *buf) {
     unsigned size = 0;
@@ -311,11 +347,18 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     // manage heredoc context
     if (valid_symbols[HEREDOC_IDENTIFIER] && !in_heredoc_context(scanner)) {
         String identifier = string_new();
-        // TODO: check that this is a valid identifier
-        while (iswalnum(lexer->lookahead) || lexer->lookahead == '_' || lexer->lookahead == '-') {
-            STRING_PUSH(identifier, lexer->lookahead);
-            advance(lexer);
+        if (!identifier_start(lexer->lookahead)) {
+            STRING_FREE(identifier);
+            return false;
         }
+        do {
+            char bytes[4];
+            unsigned length = encode_codepoint(lexer->lookahead, bytes);
+            for (unsigned i = 0; i < length; i++) {
+                STRING_PUSH(identifier, bytes[i]);
+            }
+            advance(lexer);
+        } while (identifier_continue(lexer->lookahead));
         Context ctx;
         ctx.type = HEREDOC_TEMPLATE;
         ctx.heredoc_identifier = identifier;
@@ -325,12 +368,15 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     if (valid_symbols[HEREDOC_IDENTIFIER] && in_heredoc_context(scanner) && has_leading_whitespace_with_newline) {
         String expected_identifier = VEC_BACK(scanner->context_stack).heredoc_identifier;
 
-        for (size_t i = 0; i < expected_identifier.len; i++) {
-            if (lexer->lookahead == expected_identifier.data[i]) {
-                advance(lexer);
-            } else {
+        for (size_t i = 0; i < expected_identifier.len;) {
+            char bytes[4];
+            unsigned length = encode_codepoint(lexer->lookahead, bytes);
+            if (length > expected_identifier.len - i ||
+                memcmp(expected_identifier.data + i, bytes, length) != 0) {
                 return accept_inplace(lexer, TEMPLATE_LITERAL_CHUNK);
             }
+            advance(lexer);
+            i += length;
         }
         // check if the identifier is on a line of its own
         lexer->mark_end(lexer);

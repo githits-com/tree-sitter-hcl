@@ -767,3 +767,306 @@ EOF
                   (strip_marker)
                   (template_directive_end))))
             (heredoc_identifier)))))))
+
+================================================================================
+issue 80 unicode heredoc keeps the following block
+:language(hcl)
+:language(terraform)
+================================================================================
+
+module "alpha" {
+  source = "../_modules/alpha"
+}
+
+variable "desc" {
+  default = <<ÀÈ
+hello
+ÀÈ
+}
+
+module "beta" {
+  source = "../_modules/beta"
+}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (body
+        (attribute
+          (identifier)
+          (expression
+            (literal_value
+              (string_lit
+                (quoted_template_start)
+                (template_literal)
+                (quoted_template_end))))))
+      (block_end))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (body
+        (attribute
+          (identifier)
+          (expression
+            (template_expr
+              (heredoc_template
+                (heredoc_start)
+                (heredoc_identifier)
+                (template_literal)
+                (heredoc_identifier))))))
+      (block_end))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (body
+        (attribute
+          (identifier)
+          (expression
+            (literal_value
+              (string_lit
+                (quoted_template_start)
+                (template_literal)
+                (quoted_template_end))))))
+      (block_end))))
+
+================================================================================
+invalid heredoc delimiter symbol first
+:language(hcl)
+:language(terraform)
+:error
+================================================================================
+
+value = <<@END
+body text
+@END
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+================================================================================
+heredoc delimiter regression latin
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<ÀÈ
+body text
+ÀÈ
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+heredoc delimiter regression cjk indented
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<-本文
+  body text
+  本文
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+heredoc delimiter regression astral
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<𐐀END
+body text
+𐐀END
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+heredoc delimiter regression combining
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<ÉND
+body text
+ÉND
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_literal)
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+heredoc delimiter regression nested
+:language(hcl)
+:language(terraform)
+================================================================================
+
+value = <<ÀOUT
+${<<本IN
+inner text
+本IN
+}
+ÀOUT
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+
+(config_file
+  (body
+    (attribute
+      (identifier)
+      (expression
+        (template_expr
+          (heredoc_template
+            (heredoc_start)
+            (heredoc_identifier)
+            (template_interpolation
+              (template_interpolation_start)
+              (expression
+                (template_expr
+                  (heredoc_template
+                    (heredoc_start)
+                    (heredoc_identifier)
+                    (template_literal)
+                    (heredoc_identifier))))
+              (template_interpolation_end))
+            (heredoc_identifier)))))
+    (block
+      (identifier)
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (string_lit
+        (quoted_template_start)
+        (template_literal)
+        (quoted_template_end))
+      (block_start)
+      (block_end))))
+
+================================================================================
+invalid heredoc delimiter digit first
+:language(hcl)
+:language(terraform)
+:error
+================================================================================
+
+value = <<1END
+body text
+1END
+resource "test" "after" {}
+
+--------------------------------------------------------------------------------
+

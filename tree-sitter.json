@@ -7,6 +7,9 @@
       "path": ".",
       "file-types": [
         "hcl"
+      ],
+      "external-files": [
+        "src/identifier_ranges.h"
       ]
     },
     {
@@ -18,6 +21,9 @@
         "tf",
         "tfvars",
         "tofu"
+      ],
+      "external-files": [
+        "src/identifier_ranges.h"
       ]
     }
   ],
