@@ -49,6 +49,8 @@ endif
 
 all: lib$(LANGUAGE_NAME).a lib$(LANGUAGE_NAME).$(SOEXT) $(LANGUAGE_NAME).pc
 
+$(SRC_DIR)/scanner.o: $(SRC_DIR)/identifier_ranges.h
+
 lib$(LANGUAGE_NAME).a: $(OBJS)
 	$(AR) $(ARFLAGS) $@ $^
 
